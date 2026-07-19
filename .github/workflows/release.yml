@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags: ["*.*.*"]
+
+jobs:
+  verify-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches package.json / src/info.json
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          PACKAGE_VERSION=$(jq -r .version package.json)
+          INFO_VERSION=$(jq -r .version src/info.json)
+          echo "tag=$TAG package=$PACKAGE_VERSION info=$INFO_VERSION"
+          if [ "$TAG" != "$PACKAGE_VERSION" ] || [ "$TAG" != "$INFO_VERSION" ]; then
+            echo "::error::Tag $TAG does not match package.json ($PACKAGE_VERSION) and/or src/info.json ($INFO_VERSION). Bump both to $TAG before tagging."
+            exit 1
+          fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+
+  build-and-release:
+    needs: verify-version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify build output
+        run: |
+          if [ ! -f dist/vortex-farever-extension.zip ]; then
+            echo "::error::Build did not produce dist/vortex-farever-extension.zip"
+            exit 1
+          fi
+
+      - name: Extract CHANGELOG section for this version
+        env:
+          VERSION: ${{ needs.verify-version.outputs.version }}
+        run: |
+          awk -v ver="[$VERSION]" '
+            /^## \[/ { if (found) exit; if (index($0, ver)) { found=1; next } }
+            found { print }
+          ' CHANGELOG.md > release_notes.md
+          if [ ! -s release_notes.md ]; then
+            echo "::error::No CHANGELOG.md section found for [$VERSION] - add one before tagging."
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify-version.outputs.version }}
+        run: |
+          gh release create "$VERSION" \
+            "dist/vortex-farever-extension.zip" \
+            --title "vortex-farever-extension $VERSION" \
+            --notes-file release_notes.md
