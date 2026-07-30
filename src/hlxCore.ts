@@ -1,10 +1,10 @@
-import { log, types, util } from 'vortex-api';
+import { log, selectors, types, util } from 'vortex-api';
 import { GAME_ID, HLX_CORE_DOMAIN, HLX_CORE_MOD_ID } from './common';
 
 interface INexusModFile {
   file_id: number;
   category_id: number;
-  uploaded_time: string;
+  uploaded_timestamp: number;
 }
 
 function findInstalledFileId(api: types.IExtensionApi): number | undefined {
@@ -20,15 +20,55 @@ async function getLatestFile(api: types.IExtensionApi): Promise<INexusModFile | 
   const mainFiles = files.filter(file => file.category_id === 1);
   const candidates = mainFiles.length > 0 ? mainFiles : files;
   return candidates
-    .sort((lhs, rhs) => Number.parseInt(rhs.uploaded_time, 10) - Number.parseInt(lhs.uploaded_time, 10))[0];
+    .sort((lhs, rhs) => rhs.uploaded_timestamp - lhs.uploaded_timestamp)[0];
+}
+
+// A prior 'never' start-download for this exact file may already have completed
+// without being installed (e.g. a previous activation was interrupted after
+// downloading). Reuse it instead of asking Vortex to download it again, which
+// would reject with AlreadyDownloaded.
+function findExistingDownloadId(api: types.IExtensionApi, fileId: number): string | undefined {
+  const downloads = selectors.downloadsForGame(api.getState(), HLX_CORE_DOMAIN);
+  const match = Object.entries(downloads).find(([, dl]) =>
+    dl.state === 'finished' && dl.modInfo?.nexus?.ids?.fileId === fileId);
+  return match?.[0];
 }
 
 async function installHlxCore(api: types.IExtensionApi, fileId: number): Promise<void> {
   const nxmUrl = `nxm://${HLX_CORE_DOMAIN}/mods/${HLX_CORE_MOD_ID}/files/${fileId}`;
-  const dlId = await util.toPromise<string>(cb =>
+  const dlId = findExistingDownloadId(api, fileId) ?? await util.toPromise<string>(cb =>
     api.events.emit('start-download', [nxmUrl], { game: HLX_CORE_DOMAIN }, undefined, cb, 'never', { allowInstall: false }));
   await util.toPromise<string>(cb =>
     api.events.emit('start-install-download', dlId, { allowAutoEnable: true }, cb));
+}
+
+function notifyUpdateAvailable(api: types.IExtensionApi, installedFileId: number | undefined, latest: INexusModFile): void {
+  api.sendNotification!({
+    id: 'farever-hlx-core-update-available',
+    type: 'info',
+    title: 'hlx-core update available',
+    message: 'A newer version of hlx-core is available for Farever.',
+    noDismiss: true,
+    actions: [
+      {
+        title: 'Install',
+        action: async (dismiss) => {
+          dismiss();
+          try {
+            log('info', 'installing hlx-core', { from: installedFileId, to: latest.file_id });
+            await installHlxCore(api, latest.file_id);
+            api.sendNotification!({
+              id: 'farever-hlx-core-updated',
+              type: 'success',
+              message: 'hlx-core is up to date',
+            });
+          } catch (err) {
+            api.showErrorNotification!('Failed to install hlx-core', err, { allowReport: false });
+          }
+        },
+      },
+    ],
+  });
 }
 
 export async function ensureHlxCoreUpToDate(api: types.IExtensionApi): Promise<void> {
@@ -44,14 +84,8 @@ export async function ensureHlxCoreUpToDate(api: types.IExtensionApi): Promise<v
       return;
     }
 
-    log('info', 'installing hlx-core', { from: installedFileId, to: latest.file_id });
-    await installHlxCore(api, latest.file_id);
-    api.sendNotification!({
-      id: 'farever-hlx-core-updated',
-      type: 'success',
-      message: 'hlx-core is up to date',
-    });
+    notifyUpdateAvailable(api, installedFileId, latest);
   } catch (err) {
-    api.showErrorNotification!('Failed to check/install hlx-core', err, { allowReport: false });
+    api.showErrorNotification!('Failed to check hlx-core version', err, { allowReport: false });
   }
 }

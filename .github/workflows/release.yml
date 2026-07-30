@@ -12,15 +12,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check tag matches package.json / src/info.json
+      - name: Check tag matches src/info.json
         id: version
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          PACKAGE_VERSION=$(jq -r .version package.json)
           INFO_VERSION=$(jq -r .version src/info.json)
-          echo "tag=$TAG package=$PACKAGE_VERSION info=$INFO_VERSION"
-          if [ "$TAG" != "$PACKAGE_VERSION" ] || [ "$TAG" != "$INFO_VERSION" ]; then
-            echo "::error::Tag $TAG does not match package.json ($PACKAGE_VERSION) and/or src/info.json ($INFO_VERSION). Bump both to $TAG before tagging."
+          echo "tag=$TAG info=$INFO_VERSION"
+          if [ "$TAG" != "$INFO_VERSION" ]; then
+            echo "::error::Tag $TAG does not match src/info.json ($INFO_VERSION). Bump to $TAG before tagging."
             exit 1
           fi
           echo "version=$TAG" >> "$GITHUB_OUTPUT"

@@ -11,6 +11,12 @@ and bump the version in both `package.json` and `src/info.json` to match the tag
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-07-30
+
+- Compare versions by exact upload timestamp instead of year-level precision
+- Reuse an already-downloaded archive instead of erroring on repeat activation
+- Ask before installing an update instead of installing silently
+
 ## [0.0.1] - 2026-07-19
 
 ### Added
