@@ -12,6 +12,9 @@ module.exports = {
   },
   externals: {
     'vortex-api': 'commonjs2 vortex-api',
+    'react': 'commonjs2 react',
+    'react-redux': 'commonjs2 react-redux',
+    'redux-act': 'commonjs2 redux-act',
   },
   output: {
     libraryTarget: 'commonjs2',

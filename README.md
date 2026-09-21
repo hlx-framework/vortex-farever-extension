@@ -24,6 +24,20 @@ root-relative already):
 Anything else (no `.hl` file at all) is declined, and Vortex's own default
 installer handles it instead.
 
+## Declaring a supported Farever version range
+
+A mod's Nexus file version can end with `-min<version>` and/or `-max<version>`
+to declare which Farever versions it supports, e.g. `1.2.0-min1.0.0-max2.0.0`.
+
+- `-min1.0.0`: requires Farever 1.0.0 or newer.
+- `-max2.0.0`: requires Farever 2.0.0 or older (any 2.0.0.x build).
+- Both can be combined; either half is optional.
+
+A version without this suffix (or with a `-` used for something else, like a
+pre-release tag) is treated as supporting any Farever version. Mods outside
+their declared range are refused at install time, and get disabled (with a
+notification) if Farever updates past their range after install.
+
 ## Build
 
 ```bash
