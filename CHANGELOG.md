@@ -11,6 +11,10 @@ and bump the version in both `package.json` and `src/info.json` to match the tag
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-09-23
+
+- Pre-remove an already-installed mod before an auto-update reinstalls it, so Vortex's "replace or install as variant?" dialog never appears during an unattended update
+
 ## [0.0.3] - 2026-09-22
 
 - Disable an already-installed mod that becomes incompatible after a Farever update, instead of only warning about it

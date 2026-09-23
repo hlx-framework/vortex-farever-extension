@@ -111,12 +111,33 @@ function findExistingDownloadId(api: types.IExtensionApi, domain: string, fileId
   return match?.[0];
 }
 
+// Finds the currently-installed mod for the same Nexus mod, if any. Used to pre-remove it so the
+// install manager never finds a colliding id and doesn't pop the "replace or variant?" dialog.
+function findInstalledModId(api: types.IExtensionApi, domain: string, nexusModId: number): string | undefined {
+  const match = Object.entries(getMods(api)).find(([, mod]) =>
+    mod.attributes?.source === 'nexus'
+    && mod.attributes?.modId === nexusModId
+    && (mod.attributes?.downloadGame ?? GAME_ID) === domain);
+  return match?.[0];
+}
+
 // Downloads (or reuses) and installs a specific Nexus file. installFareverMod still applies the
 // compatibility gate independently at install time, so this never bypasses it.
+//
+// Removes any existing install of the same mod first (mirroring Vortex's own "Replace" choice)
+// so InstallManager never sees a colliding mod id and skips the "replace or variant?" dialog —
+// auto-update should never require user interaction.
 async function installNexusFile(api: types.IExtensionApi, domain: string, modId: number, fileId: number): Promise<void> {
   const nxmUrl = `nxm://${domain}/mods/${modId}/files/${fileId}`;
   const dlId = findExistingDownloadId(api, domain, fileId) ?? await util.toPromise<string>(cb =>
     api.events.emit('start-download', [nxmUrl], { game: domain }, undefined, cb, 'never', { allowInstall: false }));
+
+  const existingModId = findInstalledModId(api, domain, modId);
+  if (existingModId !== undefined) {
+    await util.toPromise<void>(cb =>
+      api.events.emit('remove-mod', GAME_ID, existingModId, cb, { willBeReplaced: true, reason: 'version_update' }));
+  }
+
   await util.toPromise<string>(cb =>
     api.events.emit('start-install-download', dlId, { allowAutoEnable: true }, cb));
 }
