@@ -1,15 +1,32 @@
 import * as path from 'path';
 import { log, types, util } from 'vortex-api';
-import { EXECUTABLE, GAME_ID, HLBOOT_FILE, STEAM_ID } from './common';
+import { EXECUTABLE, GAME_ID, HLBOOT_FILE, STEAM_ID, HLX_CORE_DOMAIN, HLX_CORE_MOD_ID, GAME_VERSION_DRIVER_DOMAIN, GAME_VERSION_DRIVER_MOD_ID } from './common';
 import { readFareverVersion } from './bytecode';
 import { blockReenablingIncompatibleMods } from './compatibility/enforcement';
 import { installFareverMod, testFareverMod } from './installer';
-import { checkHlxCoreForUpdate, checkModsForUpdates } from './updates';
+import { checkModsForUpdates, ensureRequiredMods } from './updates';
 import { settingsReducer } from './settings/reducer';
 import Settings from './settings/Settings';
 
+const REQUIRED_MODS = [
+  {
+    domain: HLX_CORE_DOMAIN,
+    modId: HLX_CORE_MOD_ID,
+    modName: 'hlx-core',
+  },
+  {
+    domain: GAME_VERSION_DRIVER_DOMAIN,
+    modId: GAME_VERSION_DRIVER_MOD_ID,
+    modName: 'game-version-driver',
+  },
+];
+
 const getGameVersion = (gamePath: string): Promise<string> =>
   readFareverVersion(path.join(gamePath, HLBOOT_FILE)).then(version => version?.toString() ?? '');
+
+function ensureRequiredModsAndCheck(api: types.IExtensionApi): Promise<void> {
+  return ensureRequiredMods(api, REQUIRED_MODS).then(() => checkModsForUpdates(api));
+}
 
 function main(context: types.IExtensionContext): boolean {
   context.registerReducer(['settings', GAME_ID], settingsReducer);
@@ -26,10 +43,14 @@ function main(context: types.IExtensionContext): boolean {
     logo: 'gameart.png',
     executable: () => EXECUTABLE,
     requiredFiles: [EXECUTABLE],
-    setup: util.toBlue(() => Promise.all([
-      checkHlxCoreForUpdate(context.api),
-      checkModsForUpdates(context.api),
-    ]).then(() => undefined)),
+    setup: util.toBlue(async () => {
+      try {
+        await ensureRequiredModsAndCheck(context.api);
+      } catch (err) {
+        log('error', 'Failed during Farever setup/checks', { error: (err as Error).message });
+        context.api.showErrorNotification!('Failed during Farever setup', err, { allowReport: false });
+      }
+    }),
     getGameVersion,
     details: {
       steamAppId: Number(STEAM_ID),
@@ -45,7 +66,10 @@ function main(context: types.IExtensionContext): boolean {
       if (gameId !== GAME_ID) {
         return;
       }
-      checkModsForUpdates(context.api).catch(err => log('warn', 'Failed to check Farever mod versions', { error: (err as Error).message }));
+      ensureRequiredModsAndCheck(context.api).catch(err => {
+        log('error', 'Failed to check Farever mod versions', { error: (err as Error).message });
+        context.api.showErrorNotification!('Failed to check for Farever mod updates', err, { allowReport: false });
+      });
     });
 
     // Reverts the mod list's enable checkbox for a mod the compatibility gate disabled.

@@ -1,5 +1,5 @@
 import { actions, log, selectors, types, util } from 'vortex-api';
-import { GAME_ID, HLX_CORE_DOMAIN, HLX_CORE_MOD_ID } from '../common';
+import { GAME_ID, HLX_CORE_DOMAIN, HLX_CORE_MOD_ID, GAME_VERSION_DRIVER_DOMAIN, GAME_VERSION_DRIVER_MOD_ID } from '../common';
 import { Version } from '../bytecode';
 import { enforceCompatibility, excludeUnverifiableMods } from '../compatibility/enforcement';
 import { currentGameVersion } from '../compatibility/gameVersion';
@@ -47,6 +47,7 @@ async function autoInstallModUpdate(api: types.IExtensionApi, modId: string, mod
     });
   } catch (err) {
     reportFailure(api, `Failed to auto-update ${modName}`, err);
+    throw err;
   }
 }
 
@@ -90,17 +91,11 @@ export async function checkModsForUpdates(api: types.IExtensionApi): Promise<voi
     const nexusMods = Object.entries(mods).filter(([, mod]) =>
       mod.attributes?.source === 'nexus' && mod.attributes?.modId !== HLX_CORE_MOD_ID);
 
-    await Promise.all(nexusMods.map(([modId, mod]) => checkModForUpdate(api, modId, mod, gameVersion).catch(err =>
-      log('warn', 'Failed to check mod for updates', { modId, error: (err as Error).message }))));
+    // Don't swallow individual update failures - if any auto-install fails, the whole check should fail
+    await Promise.all(nexusMods.map(([modId, mod]) => checkModForUpdate(api, modId, mod, gameVersion)));
   } catch (err) {
     reportFailure(api, 'Failed to check mod versions against game version', err);
   }
-}
-
-function findInstalledHlxCoreFileId(api: types.IExtensionApi): number | undefined {
-  const hlxCore = Object.values(getMods(api)).find(mod =>
-    mod.attributes?.source === 'nexus' && mod.attributes?.modId === HLX_CORE_MOD_ID);
-  return hlxCore?.attributes?.fileId;
 }
 
 // Reuse a completed 'never' download instead of re-downloading (rejects AlreadyDownloaded).
@@ -142,65 +137,87 @@ async function installNexusFile(api: types.IExtensionApi, domain: string, modId:
     api.events.emit('start-install-download', dlId, { allowAutoEnable: true }, cb));
 }
 
-async function installHlxCoreUpdate(api: types.IExtensionApi, installedFileId: number | undefined, fileId: number): Promise<void> {
-  log('info', 'installing hlx-core', { from: installedFileId, to: fileId });
-  await installNexusFile(api, HLX_CORE_DOMAIN, HLX_CORE_MOD_ID, fileId);
-  api.sendNotification!({
-    id: 'farever-hlx-core-updated',
-    type: 'success',
-    message: 'hlx-core is up to date',
-  });
+export interface IRequiredMod {
+  domain: string;
+  modId: number;
+  fileId?: number;
+  modName: string;
 }
 
-function notifyHlxCoreUpdateAvailable(api: types.IExtensionApi, installedFileId: number | undefined, latest: INexusModFile): void {
-  api.sendNotification!({
-    id: 'farever-hlx-core-update-available',
-    type: 'info',
-    title: 'hlx-core update available',
-    message: 'A newer version of hlx-core is available for Farever.',
-    noDismiss: true,
-    actions: [
-      {
-        title: 'Install',
-        action: async (dismiss) => {
-          dismiss();
-          try {
-            await installHlxCoreUpdate(api, installedFileId, latest.file_id);
-          } catch (err) {
-            reportFailure(api, 'Failed to install hlx-core', err);
-          }
-        },
-      },
-    ],
-  });
+export async function ensureRequiredMods(api: types.IExtensionApi, requiredMods: IRequiredMod[]): Promise<void> {
+  for (const req of requiredMods) {
+    await ensureRequiredMod(api, req);
+  }
 }
 
-// Independent of checkModsForUpdates: hlx-core is a hard dependency, checked regardless of
-// whether Farever's own version could be determined.
-export async function checkHlxCoreForUpdate(api: types.IExtensionApi): Promise<void> {
+async function ensureRequiredMod(api: types.IExtensionApi, req: IRequiredMod): Promise<void> {
   try {
     if (api.ext?.ensureLoggedIn !== undefined) {
       await api.ext.ensureLoggedIn();
     }
 
-    const installedFileId = findInstalledHlxCoreFileId(api);
-    const latest = await checkForNewerFile<INexusModFile>(api, HLX_CORE_DOMAIN, HLX_CORE_MOD_ID, installedFileId,
-      files => newestFile(mainFilesOrAll(files)));
+    const mods = getMods(api);
+    const installed = Object.values(mods).find(
+      (m) => m.attributes?.source === 'nexus' && m.attributes?.modId === req.modId
+    );
+    const installedFileId = installed?.attributes?.fileId;
+
+    if (req.fileId !== undefined) {
+      if (installedFileId === req.fileId) {
+        return;
+      }
+      try {
+        await installNexusFile(api, req.domain, req.modId, req.fileId);
+      } catch (err) {
+        reportFailure(api, `Failed to install ${req.modName}`, err);
+        throw err;
+      }
+      return;
+    }
+
+    const latest = await checkForNewerFile<INexusModFile>(api, req.domain, req.modId, installedFileId,
+      (files) => newestFile(mainFilesOrAll(files)));
     if (latest === undefined) {
       return;
     }
 
     if (autoUpdateModsEnabled(api)) {
       try {
-        await installHlxCoreUpdate(api, installedFileId, latest.file_id);
+        await installNexusFile(api, req.domain, req.modId, latest.file_id);
+        api.sendNotification!({
+          id: `farever-${req.modId}-updated`,
+          type: 'success',
+          message: `${req.modName} updated`,
+        });
       } catch (err) {
-        reportFailure(api, 'Failed to auto-update hlx-core', err);
+        reportFailure(api, `Failed to auto-update ${req.modName}`, err);
+        throw err;
       }
       return;
     }
 
-    notifyHlxCoreUpdateAvailable(api, installedFileId, latest);
+    api.sendNotification!({
+      id: `farever-${req.modId}-update-available`,
+      type: 'info',
+      title: `${req.modName} update available`,
+      message: `${req.modName} update available.`,
+      noDismiss: true,
+      actions: [
+        {
+          title: 'Install',
+          action: async (dismiss) => {
+            dismiss();
+            try {
+              await installNexusFile(api, req.domain, req.modId, latest.file_id);
+            } catch (err) {
+              reportFailure(api, `Failed to install ${req.modName}`, err);
+            }
+          },
+        },
+      ],
+    });
   } catch (err) {
-    reportFailure(api, 'Failed to check hlx-core version', err);
+    reportFailure(api, `Failed to ensure ${req.modName}`, err);
+    throw err;
   }
 }

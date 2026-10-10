@@ -4,4 +4,6 @@ export const EXECUTABLE = 'Farever.exe';
 export const HLBOOT_FILE = 'hlboot.dat';
 export const HLX_CORE_DOMAIN = 'site';
 export const HLX_CORE_MOD_ID = 2118;
+export const GAME_VERSION_DRIVER_DOMAIN = 'farever';
+export const GAME_VERSION_DRIVER_MOD_ID = 16;
 export const IMGUI_PLUGIN_MOD_ID = 4;

@@ -11,6 +11,14 @@ and bump the version in both `package.json` and `src/info.json` to match the tag
 
 ## [Unreleased]
 
+### Fixed
+- Failed mod installations from auto-updates no longer report as success; errors are propagated and surfaced to the user.
+- Enforce installation of required dependencies (hlx-core and game-version-driver) during setup and when checking for updates; failures are propagated instead of being silently swallowed.
+
+### Changed
+- Required mod handling refactored into a generic array-based `ensureRequiredMods` with deduplicated setup/update checks.
+- game-version-driver domain corrected to `farever`; latest version is installed when no fixed file ID is specified.
+
 ## [0.0.4] - 2026-09-23
 
 - Pre-remove an already-installed mod before an auto-update reinstalls it, so Vortex's "replace or install as variant?" dialog never appears during an unattended update
